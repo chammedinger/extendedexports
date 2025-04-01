@@ -102,7 +102,6 @@ class ExtendedExport
             $orderData = [];
             $ordersCount = 0;
             foreach ($orderCollection as $order) {
-
                 if (in_array($order->getEntityId(), $excludedOrderIds)) {
                     continue;
                 }
@@ -112,8 +111,13 @@ class ExtendedExport
                 foreach ($order->getAllItems() as $item) {
                     $orderData[] = [
                         'Order ID' => $order->getIncrementId(),
+                        'Order Date' => $order->getCreatedAt(), // Added order date
                         'Customer Email' => $order->getCustomerEmail(),
                         'Total' => $order->getGrandTotal(),
+                        'Charged Shipping Cost' => $order->getShippingAmount(), // Added shipping cost
+                        'VAT Charged Shipping Cost' => $order->getShippingTaxAmount(), // Added VAT on shipping
+                        'Ship to Country' => $order->getShippingAddress() ? $order->getShippingAddress()->getCountryId() : '', // Added shipping country
+                        'Refunded Amount' => $order->getTotalRefunded(), // Added refunded amount
                         'Status' => $order->getStatus(),
                         'Item ID' => $item->getItemId(),
                         'Product ID' => $item->getProductId(),
