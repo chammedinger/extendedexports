@@ -111,6 +111,7 @@ class ExtendedExport
                 foreach ($order->getAllItems() as $item) {
                     $orderData[] = [
                         'Order ID' => $order->getIncrementId(),
+                        'Store' => $order->getStore()->getName(),
                         'Order Date' => $order->getCreatedAt(), // Added order date
                         'Customer Email' => $order->getCustomerEmail(),
                         'Total' => $order->getGrandTotal(),
