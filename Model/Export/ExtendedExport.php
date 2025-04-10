@@ -11,6 +11,7 @@ use Magento\Framework\Controller\Result\RawFactory;
 use Magento\Framework\Controller\ResultFactory;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Psr\Log\LoggerInterface;
+use Magento\Catalog\Model\ProductFactory;
 
 class ExtendedExport
 {
@@ -24,13 +25,15 @@ class ExtendedExport
         DirectoryList $directoryList,
         RawFactory $resultRawFactory,
         LoggerInterface $logger,
-        ScopeConfigInterface $scopeConfig
+        ScopeConfigInterface $scopeConfig,
+        ProductFactory $productFactory
     ) {
         $this->fileFactory = $fileFactory;
         $this->orderCollectionFactory = $orderCollectionFactory;
         $this->directoryList = $directoryList;
         $this->logger = $logger;
         $this->scopeConfig = $scopeConfig;
+        $this->productFactory = $productFactory;
     }
 
     public function export($orderIds = [], $request = null)
@@ -109,6 +112,8 @@ class ExtendedExport
                 $ordersCount++;
 
                 foreach ($order->getAllItems() as $item) {
+
+                    $product = $this->getProduct($order->getStoreId(), $item->getProductId());
                     $orderData[] = [
                         'Order ID' => $order->getIncrementId(),
                         'Store' => $order->getStore()->getName(),
@@ -128,6 +133,7 @@ class ExtendedExport
                         'Quantity' => $item->getQtyOrdered(),
                         'Row Total' => $item->getRowTotal(),
                         'VAT' => $item->getTaxAmount(),
+                        'Bizbloqs Group' => $product->getData('bizbloqs_group'), // Added custom attribute
                     ];
                 }
             }
@@ -193,5 +199,21 @@ class ExtendedExport
         } else {
             return $csv;
         }
+    }
+
+    /**
+     * Get the product by ID
+     *
+     * @param int $storeId
+     * @param int $productId
+     * @return \Magento\Catalog\Model\Product
+     */
+    public function getProduct($storeId, $productId)
+    {
+        $product = $this->productFactory->create()
+            ->setStoreId($storeId)
+            ->load($productId);
+
+        return $product;
     }
 }
