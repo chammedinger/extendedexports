@@ -11,13 +11,14 @@ use Magento\Framework\Controller\Result\RawFactory;
 use Magento\Framework\Controller\ResultFactory;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Psr\Log\LoggerInterface;
-use Magento\Catalog\Model\ProductFactory;
+use Magento\Catalog\Model\ResourceModel\Product\CollectionFactory as ProductCollectionFactory;
 
 class ExtendedExport
 {
     protected $fileFactory;
     protected $orderCollectionFactory;
     protected $directoryList;
+    protected $productCollectionFactory;
 
     public function __construct(
         FileFactory $fileFactory,
@@ -26,50 +27,39 @@ class ExtendedExport
         RawFactory $resultRawFactory,
         LoggerInterface $logger,
         ScopeConfigInterface $scopeConfig,
-        ProductFactory $productFactory
+        ProductCollectionFactory $productCollectionFactory
     ) {
         $this->fileFactory = $fileFactory;
         $this->orderCollectionFactory = $orderCollectionFactory;
         $this->directoryList = $directoryList;
         $this->logger = $logger;
         $this->scopeConfig = $scopeConfig;
-        $this->productFactory = $productFactory;
+        $this->productCollectionFactory = $productCollectionFactory;
     }
 
     public function export($orderIds = [], $request = null)
     {
         try {
-
             $excludedOrderIds = [];
             if ($request->getParam('excluded') && $request->getParam('excluded') != 'false') {
-                // $this->logger->info('Custom export action called with excluded order ids: ' . json_encode($request->getParam('excluded')));
                 $excludedOrderIds = $request->getParam('excluded');
             }
 
-            // extract possible order ids from the request params
             if ($request->getParam('selected') && $request->getParam('selected') != 'false') {
-                // $this->logger->info('Custom export action called with selected order ids: ' . json_encode($request->getParam('selected')));
                 $orderIds = array_merge($orderIds, $request->getParam('selected'));
             } elseif ($request->getParam('filters')) {
-                // $this->logger->info('Custom export action called with filter: ' . json_encode($request->getParam('filters')));
                 $filters = $request->getParam('filters');
 
                 if (isset($filters['entity_id'])) {
                     $orderIds = array_merge($orderIds, $filters['entity_id']);
                 }
 
-                if (isset($filters['increment_id'])) {
-                    $orderIds = array_merge($orderIds, $filters['increment_id']);
-                }
-
                 if (isset($filters['created_at'])) {
                     $from = date('Y-m-d 00:00:00', strtotime($filters['created_at']['from']));
                     $to = date('Y-m-d 23:59:59', strtotime($filters['created_at']['to']));
 
-                    // get the currently set timezone from Magento
                     $timezone = $this->scopeConfig->getValue('general/locale/timezone', \Magento\Store\Model\ScopeInterface::SCOPE_STORE);
 
-                    // convert dates to UTC timezone
                     $from = new \DateTime($from, new \DateTimeZone($timezone));
                     $from->setTimezone(new \DateTimeZone('UTC'));
                     $from = $from->format('Y-m-d H:i:s');
@@ -78,21 +68,16 @@ class ExtendedExport
                     $to->setTimezone(new \DateTimeZone('UTC'));
                     $to = $to->format('Y-m-d H:i:s');
 
-                    // Fetch order collection
                     $orderCollection = $this->orderCollectionFactory->create();
                     $orderCollection->addAttributeToSelect('*');
                     $orderCollection->addAttributeToFilter('created_at', ['from' => $from, 'to' => $to]);
-                    // $orderCollection->addFieldToSelect(['entity_id', 'increment_id', 'customer_email', 'grand_total', 'status']);
                 }
             }
 
             if (count($orderIds) > 0) {
-                $this->logger->info('Custom export action called with order ids: ' . json_encode($orderIds));
-                // Fetch order collection
                 $orderCollection = $this->orderCollectionFactory->create();
                 $orderCollection->addAttributeToSelect('*');
                 $orderCollection->addAttributeToFilter('entity_id', ['in' => $orderIds]);
-                // $orderCollection->addFieldToSelect(['entity_id', 'increment_id', 'customer_email', 'grand_total', 'status']);
             }
 
             if ($orderCollection->getSize() == 0) {
@@ -102,41 +87,8 @@ class ExtendedExport
                 ];
             }
 
-            $orderData = [];
-            $ordersCount = 0;
-            foreach ($orderCollection as $order) {
-                if (in_array($order->getEntityId(), $excludedOrderIds)) {
-                    continue;
-                }
-
-                $ordersCount++;
-
-                foreach ($order->getAllItems() as $item) {
-
-                    $product = $this->getProduct($order->getStoreId(), $item->getProductId());
-                    $orderData[] = [
-                        'Order ID' => $order->getIncrementId(),
-                        'Store' => $order->getStore()->getName(),
-                        'Order Date' => $order->getCreatedAt(), // Added order date
-                        'Customer Email' => $order->getCustomerEmail(),
-                        'Total' => $order->getGrandTotal(),
-                        'Charged Shipping Cost' => $order->getShippingAmount(), // Added shipping cost
-                        'VAT Charged Shipping Cost' => $order->getShippingTaxAmount(), // Added VAT on shipping
-                        'Ship to Country' => $order->getShippingAddress() ? $order->getShippingAddress()->getCountryId() : '', // Added shipping country
-                        'Refunded Amount' => $order->getTotalRefunded(), // Added refunded amount
-                        'Status' => $order->getStatus(),
-                        'Item ID' => $item->getItemId(),
-                        'Product ID' => $item->getProductId(),
-                        'Product Name' => $item->getName(),
-                        'SKU' => $item->getSku(),
-                        'Price' => $item->getPrice(),
-                        'Quantity' => $item->getQtyOrdered(),
-                        'Row Total' => $item->getRowTotal(),
-                        'VAT' => $item->getTaxAmount(),
-                        'Bizbloqs Group' => $product->getData('bizbloqs_group'), // Added custom attribute
-                    ];
-                }
-            }
+            $orderCollection->setPageSize(100); // Process 100 orders at a time
+            $currentPage = 1;
 
             $fileName = 'extended_orders_export.csv';
             $folder = $this->directoryList->getRoot() . "/storage/extendedexports/export/";
@@ -146,7 +98,83 @@ class ExtendedExport
             }
 
             $filePath = $folder . $fileName;
-            $this->str_putcsv($orderData, $filePath);
+
+            // Clear the file by opening it in write mode
+            $fh = fopen($filePath, 'w');
+            fclose($fh);
+
+            // Reopen the file in append mode
+            $fh = fopen($filePath, 'a');
+
+            // Write headers
+            fputcsv($fh, [
+                'Order ID', 'Store', 'Order Date', 'Customer Email', 'Total',
+                'Charged Shipping Cost', 'VAT Charged Shipping Cost', 'Ship to Country',
+                'Refunded Amount', 'Status', 'Item ID', 'Product ID', 'Product Name',
+                'SKU', 'Price', 'Quantity', 'Row Total', 'VAT', 'Bizbloqs Group'
+            ], ";", '"');
+
+            do {
+                $orderCollection->setCurPage($currentPage);
+                $orderCollection->load();
+
+                // Collect product IDs from the current batch of order items
+                $productIds = [];
+                foreach ($orderCollection as $order) {
+                    foreach ($order->getAllItems() as $item) {
+                        $productIds[] = $item->getProductId();
+                    }
+                }
+
+                // Load products in bulk with only the required attribute
+                $productCollection = $this->productCollectionFactory->create()
+                    ->addAttributeToSelect('bizbloqs_group')
+                    ->addFieldToFilter('entity_id', ['in' => $productIds]);
+
+                // Map product IDs to their bizbloqs_group values
+                $productData = [];
+                foreach ($productCollection as $product) {
+                    $productData[$product->getId()] = $product->getData('bizbloqs_group');
+                }
+
+                // Process orders and write to CSV
+                foreach ($orderCollection as $order) {
+                    if (in_array($order->getEntityId(), $excludedOrderIds)) {
+                        continue;
+                    }
+
+                    foreach ($order->getAllItems() as $item) {
+                        $bizbloqsGroup = $productData[$item->getProductId()] ?? ''; // Use preloaded data
+
+                        fputcsv($fh, [
+                            $order->getIncrementId(),
+                            $order->getStore()->getName(),
+                            $order->getCreatedAt(),
+                            $order->getCustomerEmail(),
+                            $order->getGrandTotal(),
+                            $order->getShippingAmount(),
+                            $order->getShippingTaxAmount(),
+                            $order->getShippingAddress() ? $order->getShippingAddress()->getCountryId() : '',
+                            $order->getTotalRefunded(),
+                            $order->getStatus(),
+                            $item->getItemId(),
+                            $item->getProductId(),
+                            $item->getName(),
+                            $item->getSku(),
+                            $item->getPrice(),
+                            $item->getQtyOrdered(),
+                            $item->getRowTotal(),
+                            $item->getTaxAmount(),
+                            $bizbloqsGroup // Use the preloaded attribute value
+                        ], ";", '"');
+                    }
+                }
+
+                $currentPage++;
+                $orderCollection->clear(); // Clear the collection to free memory
+            } while ($currentPage <= $orderCollection->getLastPageNumber());
+
+            fclose($fh);
 
             return [
                 'status' => 'success',
@@ -199,21 +227,5 @@ class ExtendedExport
         } else {
             return $csv;
         }
-    }
-
-    /**
-     * Get the product by ID
-     *
-     * @param int $storeId
-     * @param int $productId
-     * @return \Magento\Catalog\Model\Product
-     */
-    public function getProduct($storeId, $productId)
-    {
-        $product = $this->productFactory->create()
-            ->setStoreId($storeId)
-            ->load($productId);
-
-        return $product;
     }
 }
