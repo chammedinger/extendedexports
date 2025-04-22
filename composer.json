@@ -1,20 +1,18 @@
 {
   "name": "chammedinger/extendedexports",
-  "description": "Extend Magento2 order exports",
+  "description": "Extended Magento2 exports",
   "type": "magento2-module",
-  "version": "1.0.0",
-  "minimum-stability": "stable",
-  "prefer-stable": true,
-  "require": {
-    "php": ">=7.4"
-  },
   "license": "MIT",
+  "version": "1.0.0",
   "autoload": {
+    "psr-4": {
+      "Chammedinger\\ExtendedExports\\": ""
+    },
     "files": [
       "registration.php"
-    ],
-    "psr-4": {
-      "Vendor\\Module\\": ""
-    }
+    ]
+  },
+  "require": {
+    "php": ">=7.4"
   }
 }
