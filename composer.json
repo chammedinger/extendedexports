@@ -3,9 +3,12 @@
   "description": "Extend Magento2 order exports",
   "type": "magento2-module",
   "version": "1.0.0",
+  "minimum-stability": "stable",
+  "prefer-stable": true,
   "require": {
     "php": ">=7.4"
   },
+  "license": "MIT",
   "autoload": {
     "files": [
       "registration.php"
