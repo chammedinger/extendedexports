@@ -3,10 +3,10 @@
   "description": "Extended Magento2 exports",
   "type": "magento2-module",
   "license": "MIT",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "autoload": {
     "psr-4": {
-      "Chammedinger\\ExtendedExports\\": ""
+      "CHammedinger\\ExtendedExports\\": ""
     },
     "files": [
       "registration.php"
