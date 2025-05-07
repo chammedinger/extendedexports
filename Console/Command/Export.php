@@ -18,14 +18,12 @@ class Export extends \Symfony\Component\Console\Command\Command
     public function __construct(
         \Psr\Log\LoggerInterface $logger,
         \Magento\Framework\Filter\FilterManager $filterManager,
-        \CHammedinger\OrderFileImporter\Helper\Data $helper,
         \Magento\Framework\App\State $state,
         \Magento\Framework\Filesystem\DirectoryList $dir,
         ExtendedExport $extendedExport
     ) {
         $this->_logger = $logger;
         $this->filterManager = $filterManager;
-        $this->helper = $helper;
         $this->state = $state;
         $this->_dir = $dir;
         $this->extendedExport = $extendedExport;
