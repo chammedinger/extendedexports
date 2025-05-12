@@ -60,13 +60,17 @@ class ExtendedExport
 
                     $timezone = $this->scopeConfig->getValue('general/locale/timezone', \Magento\Store\Model\ScopeInterface::SCOPE_STORE);
 
-                    $from = new \DateTime($from, new \DateTimeZone($timezone));
-                    $from->setTimezone(new \DateTimeZone('UTC'));
-                    $from = $from->format('Y-m-d H:i:s');
+                    if ($from) {
+                        $from = new \DateTime($from, new \DateTimeZone($timezone));
+                        $from->setTimezone(new \DateTimeZone('UTC'));
+                        $from = $from->format('Y-m-d H:i:s');
+                    }
 
-                    $to = new \DateTime($to, new \DateTimeZone($timezone));
-                    $to->setTimezone(new \DateTimeZone('UTC'));
-                    $to = $to->format('Y-m-d H:i:s');
+                    if ($to) {
+                        $to = new \DateTime($to, new \DateTimeZone($timezone));
+                        $to->setTimezone(new \DateTimeZone('UTC'));
+                        $to = $to->format('Y-m-d H:i:s');
+                    }
 
                     $orderCollection = $this->orderCollectionFactory->create();
                     $orderCollection->addAttributeToSelect('*');
