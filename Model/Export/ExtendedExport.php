@@ -55,8 +55,8 @@ class ExtendedExport
                 }
 
                 if (isset($filters['created_at'])) {
-                    $from = date('Y-m-d 00:00:00', strtotime($filters['created_at']['from']));
-                    $to = date('Y-m-d 23:59:59', strtotime($filters['created_at']['to']));
+                    $from = isset($filters['created_at']['from']) ? date('Y-m-d 00:00:00', strtotime($filters['created_at']['from'])) : null;
+                    $to = isset($filters['created_at']['to']) ? date('Y-m-d 23:59:59', strtotime($filters['created_at']['to'])) : null;
 
                     $timezone = $this->scopeConfig->getValue('general/locale/timezone', \Magento\Store\Model\ScopeInterface::SCOPE_STORE);
 
@@ -70,7 +70,57 @@ class ExtendedExport
 
                     $orderCollection = $this->orderCollectionFactory->create();
                     $orderCollection->addAttributeToSelect('*');
-                    $orderCollection->addAttributeToFilter('created_at', ['from' => $from, 'to' => $to]);
+                    if ($from && $to) {
+                        $orderCollection->addAttributeToFilter('created_at', ['from' => $from, 'to' => $to]);
+                    } else if ($from) {
+                        $orderCollection->addAttributeToFilter('created_at', ['from' => $from]);
+                    } else if ($to) {
+                        $orderCollection->addAttributeToFilter('created_at', ['to' => $to]);
+                    }
+                }
+
+                // Add filter for purchase point
+                if (isset($filters['purchase_point'])) {
+                    // purchase_point is usually stored as 'store_id'
+                    if (!isset($orderCollection)) {
+                        $orderCollection = $this->orderCollectionFactory->create();
+                        $orderCollection->addAttributeToSelect('*');
+                    }
+                    $orderCollection->addAttributeToFilter('store_id', ['in' => (array)$filters['purchase_point']]);
+                }
+
+                // Add filter for grand_total (base and purchased)
+                if (isset($filters['grand_total_base'])) {
+                    if (!isset($orderCollection)) {
+                        $orderCollection = $this->orderCollectionFactory->create();
+                        $orderCollection->addAttributeToSelect('*');
+                    }
+                    $grandTotalBase = $filters['grand_total_base'];
+                    $from = isset($grandTotalBase['from']) ? $grandTotalBase['from'] : null;
+                    $to = isset($grandTotalBase['to']) ? $grandTotalBase['to'] : null;
+                    if ($from !== null && $to !== null) {
+                        $orderCollection->addAttributeToFilter('base_grand_total', ['from' => $from, 'to' => $to]);
+                    } elseif ($from !== null) {
+                        $orderCollection->addAttributeToFilter('base_grand_total', ['from' => $from]);
+                    } elseif ($to !== null) {
+                        $orderCollection->addAttributeToFilter('base_grand_total', ['to' => $to]);
+                    }
+                }
+                if (isset($filters['grand_total_purchased'])) {
+                    if (!isset($orderCollection)) {
+                        $orderCollection = $this->orderCollectionFactory->create();
+                        $orderCollection->addAttributeToSelect('*');
+                    }
+                    $grandTotalPurchased = $filters['grand_total_purchased'];
+                    $from = isset($grandTotalPurchased['from']) ? $grandTotalPurchased['from'] : null;
+                    $to = isset($grandTotalPurchased['to']) ? $grandTotalPurchased['to'] : null;
+                    if ($from !== null && $to !== null) {
+                        $orderCollection->addAttributeToFilter('grand_total', ['from' => $from, 'to' => $to]);
+                    } elseif ($from !== null) {
+                        $orderCollection->addAttributeToFilter('grand_total', ['from' => $from]);
+                    } elseif ($to !== null) {
+                        $orderCollection->addAttributeToFilter('grand_total', ['to' => $to]);
+                    }
                 }
             }
 
@@ -108,10 +158,25 @@ class ExtendedExport
 
             // Write headers
             fputcsv($fh, [
-                'Order ID', 'Store', 'Order Date', 'Customer Email', 'Total',
-                'Charged Shipping Cost', 'VAT Charged Shipping Cost', 'Ship to Country',
-                'Refunded Amount', 'Status', 'Item ID', 'Product ID', 'Product Name',
-                'SKU', 'Price', 'Quantity', 'Row Total', 'VAT', 'Bizbloqs Group'
+                'Order ID',
+                'Store',
+                'Order Date',
+                'Customer Email',
+                'Total',
+                'Charged Shipping Cost',
+                'VAT Charged Shipping Cost',
+                'Ship to Country',
+                'Refunded Amount',
+                'Status',
+                'Item ID',
+                'Product ID',
+                'Product Name',
+                'SKU',
+                'Price',
+                'Quantity',
+                'Row Total',
+                'VAT',
+                'Bizbloqs Group'
             ], ";", '"');
 
             do {
