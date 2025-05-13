@@ -19,6 +19,9 @@ class ExtendedExport
     protected $orderCollectionFactory;
     protected $directoryList;
     protected $productCollectionFactory;
+    protected $logger;
+    protected $scopeConfig;
+    protected $resultRawFactory;
 
     public function __construct(
         FileFactory $fileFactory,

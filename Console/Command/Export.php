@@ -7,7 +7,6 @@ use Magento\Framework\DB\Adapter\AdapterInterface;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Input\InputOption;
-use CHammedinger\ExtendedExports\Model\Export\ExtendedExport;
 
 /**
  * Class ProductAttributesCleanUp
@@ -15,12 +14,33 @@ use CHammedinger\ExtendedExports\Model\Export\ExtendedExport;
  */
 class Export extends \Symfony\Component\Console\Command\Command
 {
+    /**
+     * @var \Psr\Log\LoggerInterface
+     */
+    protected $_logger;
+    /**
+     * @var \Magento\Framework\Filter\FilterManager
+     */
+    protected $filterManager;
+    /**
+     * @var \Magento\Framework\App\State
+     */
+    protected $state;
+    /**
+     * @var \Magento\Framework\Filesystem\DirectoryList
+     */
+    protected $_dir;
+    /**
+     * @var \CHammedinger\ExtendedExports\Model\Export\ExtendedExport
+     */
+    protected $extendedExport;
+
     public function __construct(
         \Psr\Log\LoggerInterface $logger,
         \Magento\Framework\Filter\FilterManager $filterManager,
         \Magento\Framework\App\State $state,
         \Magento\Framework\Filesystem\DirectoryList $dir,
-        ExtendedExport $extendedExport
+        \CHammedinger\ExtendedExports\Model\Export\ExtendedExport $extendedExport
     ) {
         $this->_logger = $logger;
         $this->filterManager = $filterManager;
