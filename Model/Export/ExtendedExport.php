@@ -129,12 +129,35 @@ class ExtendedExport
                         $orderCollection->addAttributeToFilter('grand_total', ['to' => $to]);
                     }
                 }
+
+                // add filter for order status
+                if (isset($filters['status'])) {
+                    if (!isset($orderCollection)) {
+                        $orderCollection = $this->orderCollectionFactory->create();
+                        $orderCollection->addAttributeToSelect('*');
+                    }
+                    $orderCollection->addAttributeToFilter('status', ['in' => (array)$filters['status']]);
+                }
+
+                // add filter for purchase point
+                if (isset($filters['purchase_point'])) {
+                    if (!isset($orderCollection)) {
+                        $orderCollection = $this->orderCollectionFactory->create();
+                        $orderCollection->addAttributeToSelect('*');
+                    }
+                    $orderCollection->addAttributeToFilter('store_id', ['in' => (array)$filters['purchase_point']]);
+                }
             }
 
             if (count($orderIds) > 0) {
                 $orderCollection = $this->orderCollectionFactory->create();
                 $orderCollection->addAttributeToSelect('*');
                 $orderCollection->addAttributeToFilter('entity_id', ['in' => $orderIds]);
+            }
+
+            if (!isset($orderCollection)) {
+                $orderCollection = $this->orderCollectionFactory->create();
+                $orderCollection->addAttributeToSelect('*');
             }
 
             if ($orderCollection->getSize() == 0) {
