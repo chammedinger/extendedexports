@@ -48,6 +48,8 @@ class ExtendedExport
                 $excludedOrderIds = $request->getParam('excluded');
             }
 
+            $this->logger->info('Request parameters for export: ' . json_encode($request->getParams(), JSON_PRETTY_PRINT));
+
             if ($request->getParam('selected') && $request->getParam('selected') != 'false') {
                 $orderIds = array_merge($orderIds, $request->getParam('selected'));
             } elseif ($request->getParam('filters')) {
@@ -74,6 +76,8 @@ class ExtendedExport
                         $to->setTimezone(new \DateTimeZone('UTC'));
                         $to = $to->format('Y-m-d H:i:s');
                     }
+
+                    $this->logger->info('Date range for export: from ' . $from . ' to ' . $to);
 
                     $orderCollection = $this->orderCollectionFactory->create();
                     $orderCollection->addAttributeToSelect('*');
@@ -146,6 +150,14 @@ class ExtendedExport
                         $orderCollection->addAttributeToSelect('*');
                     }
                     $orderCollection->addAttributeToFilter('store_id', ['in' => (array)$filters['purchase_point']]);
+                }
+
+                if (isset($filters['store_id'])) {
+                    if (!isset($orderCollection)) {
+                        $orderCollection = $this->orderCollectionFactory->create();
+                        $orderCollection->addAttributeToSelect('*');
+                    }
+                    $orderCollection->addAttributeToFilter('store_id', ['in' => (array)$filters['store_id']]);
                 }
             }
 
@@ -244,7 +256,10 @@ class ExtendedExport
                         fputcsv($fh, [
                             $order->getIncrementId(),
                             $order->getStore()->getName(),
-                            $order->getCreatedAt(),
+                            // Convert UTC order date to Europe/Amsterdam timezone
+                            (new \DateTime($order->getCreatedAt(), new \DateTimeZone('UTC')))
+                                ->setTimezone(new \DateTimeZone('Europe/Amsterdam'))
+                                ->format('Y-m-d H:i:s'),
                             $order->getCustomerEmail(),
                             $order->getGrandTotal(),
                             $order->getShippingAmount(),
