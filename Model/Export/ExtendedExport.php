@@ -4,14 +4,14 @@ namespace CHammedinger\ExtendedExports\Model\Export;
 
 use Magento\Framework\App\Response\Http\FileFactory;
 use Magento\Sales\Model\ResourceModel\Order\CollectionFactory;
-use Magento\Framework\App\Filesystem\DirectoryList; // Correct import
+use Magento\Framework\App\Filesystem\DirectoryList;
 use Magento\Framework\App\ResponseInterface;
-
 use Magento\Framework\Controller\Result\RawFactory;
 use Magento\Framework\Controller\ResultFactory;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Psr\Log\LoggerInterface;
 use Magento\Catalog\Model\ResourceModel\Product\CollectionFactory as ProductCollectionFactory;
+use Magento\Store\Model\StoreManagerInterface;
 
 class ExtendedExport
 {
@@ -22,6 +22,7 @@ class ExtendedExport
     protected $logger;
     protected $scopeConfig;
     protected $resultRawFactory;
+    protected $storeManager;
 
     public function __construct(
         FileFactory $fileFactory,
@@ -30,14 +31,17 @@ class ExtendedExport
         RawFactory $resultRawFactory,
         LoggerInterface $logger,
         ScopeConfigInterface $scopeConfig,
-        ProductCollectionFactory $productCollectionFactory
+        ProductCollectionFactory $productCollectionFactory,
+        StoreManagerInterface $storeManager
     ) {
-        $this->fileFactory = $fileFactory;
-        $this->orderCollectionFactory = $orderCollectionFactory;
-        $this->directoryList = $directoryList;
-        $this->logger = $logger;
-        $this->scopeConfig = $scopeConfig;
+        $this->fileFactory             = $fileFactory;
+        $this->orderCollectionFactory  = $orderCollectionFactory;
+        $this->directoryList           = $directoryList;
+        $this->resultRawFactory        = $resultRawFactory;
+        $this->logger                  = $logger;
+        $this->scopeConfig             = $scopeConfig;
         $this->productCollectionFactory = $productCollectionFactory;
+        $this->storeManager            = $storeManager;
     }
 
     public function export($orderIds = [], $request = null)
@@ -149,15 +153,38 @@ class ExtendedExport
                         $orderCollection = $this->orderCollectionFactory->create();
                         $orderCollection->addAttributeToSelect('*');
                     }
-                    $orderCollection->addAttributeToFilter('store_id', ['in' => (array)$filters['purchase_point']]);
+                    $validStoreIds = [];
+                    foreach ((array)$filters['purchase_point'] as $storeId) {
+                        try {
+                            $this->storeManager->getStore($storeId);
+                            $validStoreIds[] = $storeId;
+                        } catch (\Magento\Framework\Exception\NoSuchEntityException $e) {
+                            // skip invalid store
+                        }
+                    }
+                    if (!empty($validStoreIds)) {
+                        $orderCollection->addAttributeToFilter('store_id', ['in' => $validStoreIds]);
+                    }
                 }
 
+                // add filter for store_id
                 if (isset($filters['store_id'])) {
                     if (!isset($orderCollection)) {
                         $orderCollection = $this->orderCollectionFactory->create();
                         $orderCollection->addAttributeToSelect('*');
                     }
-                    $orderCollection->addAttributeToFilter('store_id', ['in' => (array)$filters['store_id']]);
+                    $validStoreIds = [];
+                    foreach ((array)$filters['store_id'] as $storeId) {
+                        try {
+                            $this->storeManager->getStore($storeId);
+                            $validStoreIds[] = $storeId;
+                        } catch (\Magento\Framework\Exception\NoSuchEntityException $e) {
+                            // skip invalid store
+                        }
+                    }
+                    if (!empty($validStoreIds)) {
+                        $orderCollection->addAttributeToFilter('store_id', ['in' => $validStoreIds]);
+                    }
                 }
             }
 
@@ -253,9 +280,15 @@ class ExtendedExport
                     foreach ($order->getAllItems() as $item) {
                         $bizbloqsGroup = $productData[$item->getProductId()] ?? ''; // Use preloaded data
 
+                        try {
+                            $storeName = $order->getStore()->getName(); // Ensure store name is loaded
+                        } catch (\Magento\Framework\Exception\NoSuchEntityException $e) {
+                            $storeName = 'Unknown Store';
+                        }
+
                         fputcsv($fh, [
                             $order->getIncrementId(),
-                            $order->getStoreName() ?: 'Unknown Store',
+                            $storeName, // Use the store name from the order
                             // Convert UTC order date to Europe/Amsterdam timezone
                             (new \DateTime($order->getCreatedAt(), new \DateTimeZone('UTC')))
                                 ->setTimezone(new \DateTimeZone('Europe/Amsterdam'))
