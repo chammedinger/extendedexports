@@ -255,7 +255,7 @@ class ExtendedExport
 
                         fputcsv($fh, [
                             $order->getIncrementId(),
-                            $order->getStore()->getName(),
+                            $order->getStoreName() ?: 'Unknown Store',
                             // Convert UTC order date to Europe/Amsterdam timezone
                             (new \DateTime($order->getCreatedAt(), new \DateTimeZone('UTC')))
                                 ->setTimezone(new \DateTimeZone('Europe/Amsterdam'))
