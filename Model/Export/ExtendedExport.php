@@ -283,7 +283,7 @@ class ExtendedExport
                         try {
                             $storeName = $order->getStore()->getName(); // Ensure store name is loaded
                         } catch (\Magento\Framework\Exception\NoSuchEntityException $e) {
-                            $storeName = 'Unknown Store';
+                            $storeName = $order->getStoreName() ?: 'Unknown Store';
                         }
 
                         fputcsv($fh, [
