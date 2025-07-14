@@ -182,8 +182,10 @@ class ExtendedExport
                     $tdt = (new \DateTime($to . ' 23:59:59', new \DateTimeZone($tz)))
                         ->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s');
                 }
-                if (isset($fdt, $tdt)) {
-                    $select->where('o.created_at BETWEEN ? AND ?', [$fdt, $tdt]);
+                if (isset($fdt) && isset($tdt)) {
+                    $select
+                        ->where('o.created_at >= ?', $fdt)
+                        ->where('o.created_at <= ?', $tdt);
                 } elseif (isset($fdt)) {
                     $select->where('o.created_at >= ?', $fdt);
                 } elseif (isset($tdt)) {
