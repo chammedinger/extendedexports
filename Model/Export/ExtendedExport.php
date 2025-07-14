@@ -88,6 +88,7 @@ class ExtendedExport
                 'Ship to Country',
                 'Refunded Amount',
                 'Status',
+                'Payment Method',      // Add this header
                 'Item ID',
                 'Product ID',
                 'Product Name',
@@ -142,6 +143,12 @@ class ExtendedExport
                     "a.parent_id = o.entity_id AND a.address_type = 'shipping'",
                     ['ship_to_country' => 'country_id']
                 )
+                // join payment method
+                ->joinLeft(
+                    ['p' => $conn->getTableName('sales_order_payment')],
+                    'p.parent_id = o.entity_id',
+                    ['payment_method' => 'method']
+                )
                 ->join(
                     ['i' => $i],
                     'i.order_id = o.entity_id',
@@ -158,9 +165,9 @@ class ExtendedExport
                 )
                 ->joinLeft(
                     ['b' => $valueTable],
-                    "b.entity_id    = i.product_id
+                    "b.entity_id = i.product_id
                      AND b.attribute_id = {$attrId}
-                     AND b.store_id     = 0",
+                     AND b.store_id = 0",
                     ['bizbloqs_group' => 'value']
                 )
                 ->order('o.entity_id');
@@ -242,9 +249,10 @@ class ExtendedExport
                     $row['grand_total'],
                     $row['shipping_amount'],
                     $row['shipping_tax_amount'],
-                    $row['ship_to_country'],    // correct position
+                    $row['ship_to_country'],
                     $row['total_refunded'],
                     $row['status'],
+                    $row['payment_method'],
                     $row['item_id'],
                     $row['product_id'],
                     $row['name'],
