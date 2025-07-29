@@ -116,9 +116,17 @@ class ExtendedExport
                     AND attribute_code    = 'bizbloqs_group'",
                 $eType
             );
-            $attrId      = (int)$attr['attribute_id'];
-            $tableSuffix = $attr['backend_type'];   // e.g. 'varchar', 'int', etc.
-            $valueTable  = $conn->getTableName("catalog_product_entity_{$tableSuffix}");
+
+            if (!$attr) {
+                // Handle case where bizbloqs_group attribute doesn't exist
+                $attrId = null;
+                $tableSuffix = null;
+                $valueTable = null;
+            } else {
+                $attrId      = (int)$attr['attribute_id'];
+                $tableSuffix = $attr['backend_type'];   // e.g. 'varchar', 'int', etc.
+                $valueTable  = $conn->getTableName("catalog_product_entity_{$tableSuffix}");
+            }
 
             $o = $conn->getTableName('sales_order');
             $i = $conn->getTableName('sales_order_item');
@@ -162,15 +170,22 @@ class ExtendedExport
                         'row_total',
                         'tax_amount'
                     ]
-                )
-                ->joinLeft(
+                );
+
+            // Only join bizbloqs_group if the attribute exists
+            if ($attrId && $valueTable) {
+                $select->joinLeft(
                     ['b' => $valueTable],
                     "b.entity_id = i.product_id
                      AND b.attribute_id = {$attrId}
                      AND b.store_id = 0",
                     ['bizbloqs_group' => 'value']
-                )
-                ->order('o.entity_id');
+                );
+            } else {
+                // Add a NULL column if attribute doesn't exist
+                $select->columns(['bizbloqs_group' => new \Zend_Db_Expr('NULL')]);
+            }
+            $select->order('o.entity_id');
 
             // apply entity_id filter if any
             if (!empty($orderIds)) {
