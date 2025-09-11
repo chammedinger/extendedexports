@@ -51,6 +51,15 @@ class ExtendedExport
     public function export($orderIds = [], $request = null)
     {
         try {
+            $customAttributes = [
+                'bizbloqs_group',
+                'test_attribute',
+            ];
+
+            $orderAttributes = [
+                'tracking_data',
+            ];
+
             // --- build orderIds from selected or filters ---
             $excludedOrderIds = [];
             if ($request->getParam('excluded') && $request->getParam('excluded') !== 'false') {
@@ -77,18 +86,19 @@ class ExtendedExport
             fclose($fh);
             $fh = fopen($filePath, 'a');
             // write headers
-            fputcsv($fh, [
+            $baseHeaders = [
                 'Order ID',
                 'Store',
                 'Order Date',
                 'Customer Email',
                 'Total',
+                'Discount Amount',
                 'Charged Shipping Cost',
                 'VAT Charged Shipping Cost',
                 'Ship to Country',
                 'Refunded Amount',
                 'Status',
-                'Payment Method',      // Add this header
+                'Payment Method',
                 'Item ID',
                 'Product ID',
                 'Product Name',
@@ -97,40 +107,53 @@ class ExtendedExport
                 'Quantity',
                 'Row Total',
                 'VAT',
-                'Bizbloqs Group'
-            ], ';', '"');
+            ];
+            $headers = $baseHeaders;
+            // NEW: add order attribute headers first
+            foreach ($orderAttributes as $oAttr) {
+                $headers[] = ucwords(str_replace('_', ' ', $oAttr));
+            }
+            // existing: add product attribute headers
+            foreach ($customAttributes as $attrCode) {
+                $headers[] = ucwords(str_replace('_', ' ', $attrCode));
+            }
+            fputcsv($fh, $headers, ';', '"');
 
             // --- direct DB stream using PDO cursor ---
             $conn = $this->resource->getConnection();
 
-            // find attribute_id for bizbloqs_group
-            $eType  = $conn->fetchOne(
+            // 2) resolve product entity type and attribute meta once
+            $eType = $conn->fetchOne(
                 "SELECT entity_type_id FROM {$conn->getTableName('eav_entity_type')}
                  WHERE entity_type_code='catalog_product'"
             );
-            // 1) fetch both id and backend_type
-            $attr = $conn->fetchRow(
-                "SELECT attribute_id, backend_type
-                   FROM {$conn->getTableName('eav_attribute')}
-                  WHERE entity_type_id = ?
-                    AND attribute_code    = 'bizbloqs_group'",
-                $eType
-            );
 
-            if (!$attr) {
-                // Handle case where bizbloqs_group attribute doesn't exist
-                $attrId = null;
-                $tableSuffix = null;
-                $valueTable = null;
-            } else {
-                $attrId      = (int)$attr['attribute_id'];
-                $tableSuffix = $attr['backend_type'];   // e.g. 'varchar', 'int', etc.
-                $valueTable  = $conn->getTableName("catalog_product_entity_{$tableSuffix}");
+            // Sanitize and dedupe list
+            $customAttributes = array_values(array_unique(array_filter($customAttributes)));
+
+            $attributesInfo = [];
+            if (!empty($customAttributes)) {
+                // Use the select builder so IN (?) binds arrays correctly
+                $attrSelect = $conn->select()
+                    ->from($conn->getTableName('eav_attribute'), ['attribute_code', 'attribute_id', 'backend_type'])
+                    ->where('entity_type_id = ?', $eType)
+                    ->where('attribute_code IN (?)', $customAttributes);
+
+                $attrRows = $conn->fetchAll($attrSelect);
+
+                foreach ($attrRows as $r) {
+                    $attributesInfo[$r['attribute_code']] = [
+                        'id'    => (int)$r['attribute_id'],
+                        'type'  => $r['backend_type'], // varchar|int|decimal|text|datetime|static
+                        'table' => $r['backend_type'] === 'static'
+                            ? $conn->getTableName('catalog_product_entity')
+                            : $conn->getTableName('catalog_product_entity_' . $r['backend_type']),
+                    ];
+                }
             }
 
             $o = $conn->getTableName('sales_order');
             $i = $conn->getTableName('sales_order_item');
-            $b = $conn->getTableName('catalog_product_entity_int');
             $a = $conn->getTableName('sales_order_address');
 
             $select = $conn->select()
@@ -140,57 +163,92 @@ class ExtendedExport
                     'created_at',
                     'customer_email',
                     'grand_total',
+                    'discount_amount',
                     'shipping_amount',
                     'shipping_tax_amount',
                     'total_refunded',
                     'status'
                 ])
-                // join shipping address to get country_id
-                ->joinLeft(
-                    ['a' => $a],
-                    "a.parent_id = o.entity_id AND a.address_type = 'shipping'",
-                    ['ship_to_country' => 'country_id']
-                )
-                // join payment method
-                ->joinLeft(
-                    ['p' => $conn->getTableName('sales_order_payment')],
-                    'p.parent_id = o.entity_id',
-                    ['payment_method' => 'method']
-                )
-                ->join(
-                    ['i' => $i],
-                    'i.order_id = o.entity_id',
-                    [
-                        'item_id',
-                        'product_id',
-                        'name',
-                        'sku',
-                        'price',
-                        'qty_ordered',
-                        'row_total',
-                        'tax_amount'
-                    ]
-                );
+                ->joinLeft(['a' => $a], "a.parent_id = o.entity_id AND a.address_type = 'shipping'", ['ship_to_country' => 'country_id'])
+                ->joinLeft(['p' => $conn->getTableName('sales_order_payment')], 'p.parent_id = o.entity_id', ['payment_method' => 'method'])
+                ->join(['i' => $i], 'i.order_id = o.entity_id', [
+                    'item_id','product_id','name','sku','price','qty_ordered','row_total','tax_amount'
+                ]);
 
-            // Only join bizbloqs_group if the attribute exists
-            if ($attrId && $valueTable) {
-                $select->joinLeft(
-                    ['b' => $valueTable],
-                    "b.entity_id = i.product_id
-                     AND b.attribute_id = {$attrId}
-                     AND b.store_id = 0",
-                    ['bizbloqs_group' => 'value']
-                );
-            } else {
-                // Add a NULL column if attribute doesn't exist
-                $select->columns(['bizbloqs_group' => new \Zend_Db_Expr('NULL')]);
+            // NEW: add order-level attribute columns safely (only if column exists)
+            $oTableResolved = $conn->getTableName('sales_order');
+            foreach (array_values(array_unique(array_filter($orderAttributes))) as $oAttr) {
+                if ($conn->tableColumnExists($oTableResolved, $oAttr)) {
+                    $select->columns([$oAttr => new \Zend_Db_Expr("o.`{$oAttr}`")]);
+                } else {
+                    // keep CSV shape stable if column missing
+                    $select->columns([$oAttr => new \Zend_Db_Expr('NULL')]);
+                }
             }
+
+            // 3) dynamic attribute joins with store fallback (store 0 -> order store)
+            //    COALESCE(store.value, default.value) as {attrCode}
+            $joinedCpe = false; // only join cpe once if any static attrs
+            $idx = 0;
+            foreach ($customAttributes as $attrCode) {
+                if (!isset($attributesInfo[$attrCode])) {
+                    // attribute not found: output NULL column
+                    $select->columns([$attrCode => new \Zend_Db_Expr('NULL')]);
+                    $idx++;
+                    continue;
+                }
+
+                $meta = $attributesInfo[$attrCode];
+
+                if ($meta['type'] === 'static') {
+                    if (!$joinedCpe) {
+                        $select->joinLeft(
+                            ['cpe' => $meta['table']],
+                            'cpe.entity_id = i.product_id',
+                            []
+                        );
+                        $joinedCpe = true;
+                    }
+                    $select->columns([$attrCode => new \Zend_Db_Expr("cpe.`{$attrCode}`")]);
+                } else {
+                    $def = "attrd_{$idx}";
+                    $sto = "attrs_{$idx}";
+                    $tbl = $meta['table'];
+                    $attId = (int)$meta['id'];
+
+                    // default (store 0)
+                    $select->joinLeft(
+                        [$def => $tbl],
+                        "{$def}.entity_id = i.product_id AND {$def}.attribute_id = {$attId} AND {$def}.store_id = 0",
+                        []
+                    );
+                    // store-specific (order's store_id)
+                    $select->joinLeft(
+                        [$sto => $tbl],
+                        "{$sto}.entity_id = i.product_id AND {$sto}.attribute_id = {$attId} AND {$sto}.store_id = o.store_id",
+                        []
+                    );
+                    // prefer store value, fallback to default
+                    $select->columns([
+                        $attrCode => new \Zend_Db_Expr("COALESCE({$sto}.value, {$def}.value)")
+                    ]);
+                }
+
+                $idx++;
+            }
+
             $select->order('o.entity_id');
 
             // apply entity_id filter if any
             if (!empty($orderIds)) {
                 $select->where('o.entity_id IN(?)', $orderIds);
             }
+
+            // exclude specific order IDs
+            if (!empty($excludedOrderIds)) {
+                $select->where('o.entity_id NOT IN(?)', $excludedOrderIds);
+            }
+
             // apply created_at filter
             if (!empty($filters['created_at'])) {
                 $tz    = $this->scopeConfig->getValue('general/locale/timezone', \Magento\Store\Model\ScopeInterface::SCOPE_STORE);
@@ -256,12 +314,13 @@ class ExtendedExport
                     ->setTimezone(new \DateTimeZone('Europe/Amsterdam'))
                     ->format('Y-m-d H:i:s');
 
-                fputcsv($fh, [
+                $csvRow = [
                     $row['increment_id'],
                     $row['store_name'],
                     $row['created_at'],
                     $row['customer_email'],
                     $row['grand_total'],
+                    $row['discount_amount'],
                     $row['shipping_amount'],
                     $row['shipping_tax_amount'],
                     $row['ship_to_country'],
@@ -276,8 +335,16 @@ class ExtendedExport
                     $row['qty_ordered'],
                     $row['row_total'],
                     $row['tax_amount'],
-                    $row['bizbloqs_group'],
-                ], ';', '"');
+                ];
+                // NEW: append order attribute values
+                foreach ($orderAttributes as $oAttr) {
+                    $csvRow[] = $row[$oAttr] ?? '';
+                }
+                // existing: append product attribute values
+                foreach ($customAttributes as $attrCode) {
+                    $csvRow[] = $row[$attrCode] ?? '';
+                }
+                fputcsv($fh, $csvRow, ';', '"');
             }
             fclose($fh);
 
