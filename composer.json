@@ -1,6 +1,6 @@
 {
   "name": "chammedinger/extendedexports",
-  "description": "Extended Magento2 exports",
+  "description": "Magento 2 Extended exports",
   "type": "magento2-module",
   "license": "MIT",
   "version": "1.2.1",
