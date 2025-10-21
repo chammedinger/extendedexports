@@ -58,6 +58,7 @@ class ExtendedExport
 
             $orderAttributes = [
                 'tracking_data',
+                'gift_message_fee',
             ];
 
             // --- build orderIds from selected or filters ---
@@ -93,6 +94,7 @@ class ExtendedExport
                 'Customer Email',
                 'Total',
                 'Discount Amount',
+                'Discount Description',
                 'Discount Code',
                 'Charged Shipping Cost',
                 'VAT Charged Shipping Cost',
@@ -165,6 +167,7 @@ class ExtendedExport
                     'customer_email',
                     'grand_total',
                     'discount_amount',
+                    'discount_description',
                     'coupon_code',
                     'shipping_amount',
                     'shipping_tax_amount',
@@ -323,6 +326,7 @@ class ExtendedExport
                     $row['customer_email'],
                     $row['grand_total'],
                     $row['discount_amount'],
+                    $row['discount_description'] ?? '',
                     $row['coupon_code'] ?? '',
                     $row['shipping_amount'],
                     $row['shipping_tax_amount'],
