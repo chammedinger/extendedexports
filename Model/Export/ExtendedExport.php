@@ -358,11 +358,18 @@ class ExtendedExport
 
             // stream rows
             $stmt = $conn->query($select);
+            
+            // Get configured timezone from Magento
+            $configuredTimezone = $this->scopeConfig->getValue(
+                'general/locale/timezone',
+                \Magento\Store\Model\ScopeInterface::SCOPE_STORE
+            ) ?: 'UTC';
+            
             while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
-                // convert UTC created_at to Europe/Amsterdam
+                // convert UTC created_at to configured store timezone
                 $dt = new \DateTime($row['created_at'], new \DateTimeZone('UTC'));
                 $row['created_at'] = $dt
-                    ->setTimezone(new \DateTimeZone('Europe/Amsterdam'))
+                    ->setTimezone(new \DateTimeZone($configuredTimezone))
                     ->format('Y-m-d H:i:s');
 
                 $csvRow = [

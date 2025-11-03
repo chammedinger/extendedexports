@@ -16,8 +16,6 @@
 - **Configurable Data Sources** – Pick sales order columns, product attributes, and arbitrary tables directly from the admin UI.
 - **Admin & CLI Triggers** – Run the export from the Orders grid mass action or the included console command.
 - **Safe Streaming** – Streams rows via PDO cursor to keep memory usage predictable on large datasets.
-- **Graceful Fallbacks** – Missing tables/columns are logged and skipped; CSV structure stays intact.
-- **Timezone-Aware Dates** – Order timestamps are converted from UTC to `Europe/Amsterdam` by default (adjust inside `ExtendedExport::export`).
 
 ---
 
