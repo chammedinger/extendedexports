@@ -13,6 +13,9 @@ use Psr\Log\LoggerInterface;
 use Magento\Catalog\Model\ResourceModel\Product\CollectionFactory as ProductCollectionFactory;
 use Magento\Store\Model\StoreManagerInterface;
 use Magento\Framework\App\ResourceConnection;
+use Magento\Framework\Serialize\SerializerInterface;
+use Magento\Framework\DB\Adapter\AdapterInterface;
+use Magento\Store\Model\ScopeInterface;
 
 class ExtendedExport
 {
@@ -25,6 +28,7 @@ class ExtendedExport
     protected $resultRawFactory;
     protected $storeManager;
     private $resource;
+    private SerializerInterface $serializer;
 
     public function __construct(
         FileFactory $fileFactory,
@@ -35,7 +39,8 @@ class ExtendedExport
         ScopeConfigInterface $scopeConfig,
         ProductCollectionFactory $productCollectionFactory,
         StoreManagerInterface $storeManager,
-        ResourceConnection $resource
+        ResourceConnection $resource,
+        SerializerInterface $serializer
     ) {
         $this->fileFactory             = $fileFactory;
         $this->orderCollectionFactory  = $orderCollectionFactory;
@@ -46,20 +51,22 @@ class ExtendedExport
         $this->productCollectionFactory = $productCollectionFactory;
         $this->storeManager            = $storeManager;
         $this->resource                = $resource;
+        $this->serializer              = $serializer;
     }
 
     public function export($orderIds = [], $request = null)
     {
         try {
             $customAttributes = [
-                'bizbloqs_group',
-                'test_attribute',
+                // 'bizbloqs_group',
             ];
 
             $orderAttributes = [
-                'tracking_data',
-                'gift_message_fee',
+                // 'tracking_data',
+                // 'gift_message_fee',
             ];
+
+            $filters = [];
 
             // --- build orderIds from selected or filters ---
             $excludedOrderIds = [];
@@ -86,6 +93,26 @@ class ExtendedExport
             $fh = fopen($filePath, 'w');
             fclose($fh);
             $fh = fopen($filePath, 'a');
+            // setup db connection and dynamic metadata
+            $conn = $this->resource->getConnection();
+            $extensionTables = $this->resolveExtensionTableMappings($conn);
+            $productAttributes = $this->resolveProductAttributes($conn);
+            if (!empty($productAttributes)) {
+                $customAttributes = array_map(static function (array $attribute): string {
+                    return $attribute['code'];
+                }, $productAttributes);
+            }
+            $orderAttributes = $this->resolveOrderAttributes($conn);
+            $orderAttributeMap = [];
+            foreach ($orderAttributes as $meta) {
+                $column = $meta['column'] ?? '';
+                if ($column === '' || isset($orderAttributeMap[$column])) {
+                    continue;
+                }
+                $orderAttributeMap[$column] = $meta;
+            }
+            $orderAttributes = array_values($orderAttributeMap);
+            $orderAttributeColumns = array_keys($orderAttributeMap);
             // write headers
             $baseHeaders = [
                 'Order ID',
@@ -113,17 +140,18 @@ class ExtendedExport
             ];
             $headers = $baseHeaders;
             // NEW: add order attribute headers first
-            foreach ($orderAttributes as $oAttr) {
-                $headers[] = ucwords(str_replace('_', ' ', $oAttr));
+            foreach ($orderAttributes as $attrMeta) {
+                $headers[] = $attrMeta['label'];
             }
             // existing: add product attribute headers
-            foreach ($customAttributes as $attrCode) {
-                $headers[] = ucwords(str_replace('_', ' ', $attrCode));
+            foreach ($productAttributes as $attributeMeta) {
+                $label = $attributeMeta['label'] ?? $attributeMeta['code'];
+                $headers[] = sprintf('%s (%s)', $label, $attributeMeta['code']);
+            }
+            foreach ($extensionTables as $extColumn) {
+                $headers[] = $extColumn['header'];
             }
             fputcsv($fh, $headers, ';', '"');
-
-            // --- direct DB stream using PDO cursor ---
-            $conn = $this->resource->getConnection();
 
             // 2) resolve product entity type and attribute meta once
             $eType = $conn->fetchOne(
@@ -182,13 +210,31 @@ class ExtendedExport
 
             // NEW: add order-level attribute columns safely (only if column exists)
             $oTableResolved = $conn->getTableName('sales_order');
-            foreach (array_values(array_unique(array_filter($orderAttributes))) as $oAttr) {
-                if ($conn->tableColumnExists($oTableResolved, $oAttr)) {
-                    $select->columns([$oAttr => new \Zend_Db_Expr("o.`{$oAttr}`")]);
+            foreach ($orderAttributeColumns as $columnName) {
+                if ($conn->tableColumnExists($oTableResolved, $columnName)) {
+                    $select->columns([$columnName => new \Zend_Db_Expr("o.`{$columnName}`")]);
                 } else {
                     // keep CSV shape stable if column missing
-                    $select->columns([$oAttr => new \Zend_Db_Expr('NULL')]);
+                    $select->columns([$columnName => new \Zend_Db_Expr('NULL')]);
                 }
+            }
+
+            foreach ($extensionTables as $extConfig) {
+                $select->joinLeft(
+                    [$extConfig['alias'] => $extConfig['table']],
+                    sprintf(
+                        '%s = %s',
+                        $conn->quoteIdentifier([$extConfig['alias'], $extConfig['key_column']]),
+                        $conn->quoteIdentifier(['o', $extConfig['join_field']])
+                    ),
+                    []
+                );
+
+                $select->columns([
+                    $extConfig['column_alias'] => new \Zend_Db_Expr(
+                        $conn->quoteIdentifier([$extConfig['alias'], $extConfig['value_column']])
+                    )
+                ]);
             }
 
             // 3) dynamic attribute joins with store fallback (store 0 -> order store)
@@ -344,12 +390,17 @@ class ExtendedExport
                     $row['tax_amount'],
                 ];
                 // NEW: append order attribute values
-                foreach ($orderAttributes as $oAttr) {
-                    $csvRow[] = $row[$oAttr] ?? '';
+                foreach ($orderAttributes as $attrMeta) {
+                    $column = $attrMeta['column'];
+                    $csvRow[] = $row[$column] ?? '';
                 }
                 // existing: append product attribute values
-                foreach ($customAttributes as $attrCode) {
-                    $csvRow[] = $row[$attrCode] ?? '';
+                foreach ($productAttributes as $attributeMeta) {
+                    $code = $attributeMeta['code'];
+                    $csvRow[] = $row[$code] ?? '';
+                }
+                foreach ($extensionTables as $extConfig) {
+                    $csvRow[] = $row[$extConfig['column_alias']] ?? '';
                 }
                 fputcsv($fh, $csvRow, ';', '"');
             }
@@ -364,6 +415,267 @@ class ExtendedExport
             $this->logger->error('[ERROR] ExtendedExports - Export - ' . $e->getMessage());
             return ['status' => 'error', 'message' => $e->getMessage()];
         }
+    }
+
+    /**
+     * Determine which product attributes should be exported based on configuration.
+     */
+    private function resolveProductAttributes(AdapterInterface $conn): array
+    {
+        $configValue = $this->scopeConfig->getValue(
+            'extendedexports/general/product_attributes',
+            ScopeInterface::SCOPE_STORE
+        );
+
+        if (empty($configValue)) {
+            return [];
+        }
+
+        $rows = $this->deserializeExtensionTableConfig($configValue);
+        if (empty($rows) || !is_array($rows)) {
+            return [];
+        }
+
+        $entityTypeId = $conn->fetchOne(
+            "SELECT entity_type_id FROM {$conn->getTableName('eav_entity_type')} WHERE entity_type_code = 'catalog_product'"
+        );
+
+        if (!$entityTypeId) {
+            return [];
+        }
+
+        $attributeTable = $conn->getTableName('eav_attribute');
+
+        $attributes = [];
+        $seen = [];
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $code = trim((string)($row['attribute_code'] ?? ''));
+            if ($code === '' || isset($seen[$code])) {
+                continue;
+            }
+
+            $attributeMeta = $conn->fetchRow(
+                $conn->select()
+                    ->from($attributeTable, ['attribute_code', 'frontend_label'])
+                    ->where('entity_type_id = ?', $entityTypeId)
+                    ->where('attribute_code = ?', $code)
+            );
+
+            if (!$attributeMeta) {
+                $this->logger->warning(
+                    sprintf('ExtendedExports: Product attribute "%s" not found, skipping.', $code)
+                );
+                continue;
+            }
+
+            $label = $attributeMeta['frontend_label'] ?: $attributeMeta['attribute_code'];
+
+            $attributes[] = [
+                'code'  => $attributeMeta['attribute_code'],
+                'label' => $label,
+            ];
+
+            $seen[$attributeMeta['attribute_code']] = true;
+        }
+
+        return $attributes;
+    }
+
+    private function resolveOrderAttributes(AdapterInterface $conn): array
+    {
+        $configValue = $this->scopeConfig->getValue(
+            'extendedexports/general/order_attributes',
+            ScopeInterface::SCOPE_STORE
+        );
+
+        if (empty($configValue)) {
+            return [];
+        }
+
+        $rows = $this->deserializeExtensionTableConfig($configValue);
+        if (empty($rows) || !is_array($rows)) {
+            return [];
+        }
+
+        $tableName = $conn->getTableName('sales_order');
+
+        try {
+            $columns = $conn->describeTable($tableName);
+        } catch (\Throwable $exception) {
+            $this->logger->warning('ExtendedExports: Unable to describe sales_order table.', ['exception' => $exception]);
+            return [];
+        }
+
+        $attributes = [];
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $column = trim((string)($row['column_name'] ?? ''));
+            if ($column === '') {
+                continue;
+            }
+
+            if (!isset($columns[$column])) {
+                $this->logger->warning(
+                    sprintf('ExtendedExports: Order attribute column "%s" not found on sales_order.', $column)
+                );
+                continue;
+            }
+
+            $label = ucwords(str_replace('_', ' ', $column));
+
+            $attributes[] = [
+                'column' => $column,
+                'label'  => sprintf('%s (%s)', $label, $column),
+            ];
+        }
+
+        return $attributes;
+    }
+
+    /**
+     * Build join metadata for the extension table configuration.
+     */
+    private function resolveExtensionTableMappings(AdapterInterface $conn): array
+    {
+        $configValue = $this->scopeConfig->getValue(
+            'extendedexports/general/extension_tables',
+            ScopeInterface::SCOPE_STORE
+        );
+
+        if (empty($configValue)) {
+            return [];
+        }
+
+        $rows = $this->deserializeExtensionTableConfig($configValue);
+        if (empty($rows) || !is_array($rows)) {
+            return [];
+        }
+
+        $mappings = [];
+        $index = 0;
+
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+
+            $tableId = trim((string)($row['table_name'] ?? ''));
+            $keyColumn = trim((string)($row['key'] ?? ''));
+            $valueColumn = trim((string)($row['export_value'] ?? ''));
+
+            if ($tableId === '' || $keyColumn === '' || $valueColumn === '') {
+                continue;
+            }
+
+            $tableName = $conn->getTableName($tableId);
+            if (!$conn->isTableExists($tableName)) {
+                $this->logger->warning(
+                    sprintf('ExtendedExports: Table "%s" does not exist, skipping configuration entry.', $tableId)
+                );
+                continue;
+            }
+
+            try {
+                $columns = $conn->describeTable($tableName);
+            } catch (\Throwable $exception) {
+                $this->logger->warning(
+                    sprintf('ExtendedExports: Unable to describe table "%s".', $tableName),
+                    ['exception' => $exception]
+                );
+                continue;
+            }
+
+            if (!isset($columns[$keyColumn])) {
+                $this->logger->warning(
+                    sprintf('ExtendedExports: Key column "%s" missing on table "%s".', $keyColumn, $tableId)
+                );
+                continue;
+            }
+
+            if (!isset($columns[$valueColumn])) {
+                $this->logger->warning(
+                    sprintf('ExtendedExports: Export value column "%s" missing on table "%s".', $valueColumn, $tableId)
+                );
+                continue;
+            }
+
+            $alias = sprintf('ext_table_%d', $index);
+            $columnAlias = sprintf('extension_table_value_%d', $index);
+
+            $mappings[] = [
+                'alias'        => $alias,
+                'table'        => $tableName,
+                'key_column'   => $keyColumn,
+                'value_column' => $valueColumn,
+                'column_alias' => $columnAlias,
+                'join_field'   => $this->determineJoinField($columns[$keyColumn]),
+                'header'       => $this->formatExtensionHeader($tableId, $valueColumn),
+            ];
+
+            $index++;
+        }
+
+        return $mappings;
+    }
+
+    private function deserializeExtensionTableConfig($value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if (!is_string($value) || $value === '') {
+            return [];
+        }
+
+        try {
+            $decoded = $this->serializer->unserialize($value);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        } catch (\InvalidArgumentException $exception) {
+            // ignore and fall back to PHP unserialize
+        } catch (\Throwable $exception) {
+            // ignore and fall back to PHP unserialize
+        }
+
+        try {
+            $decoded = unserialize($value, ['allowed_classes' => false]);
+            if (is_array($decoded)) {
+                return $decoded;
+            }
+        } catch (\Throwable $exception) {
+            $this->logger->warning(
+                'ExtendedExports: Unable to unserialize extension table configuration.',
+                ['exception' => $exception]
+            );
+        }
+
+        return [];
+    }
+
+    private function determineJoinField(array $columnMeta): string
+    {
+        $dataType = strtolower((string)($columnMeta['DATA_TYPE'] ?? ''));
+        $numericTypes = ['int', 'integer', 'smallint', 'bigint', 'mediumint', 'tinyint', 'decimal', 'float', 'double'];
+
+        return in_array($dataType, $numericTypes, true) ? 'entity_id' : 'increment_id';
+    }
+
+    private function formatExtensionHeader(string $tableId, string $column): string
+    {
+        $columnLabel = ucwords(str_replace('_', ' ', $column));
+
+        return sprintf('%s (%s)', $columnLabel, $tableId);
     }
 
     /**
