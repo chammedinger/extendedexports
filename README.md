@@ -1,12 +1,5 @@
 # ExtendedExports for Magento 2
 
-**ExtendedExports** is a Magento 2 extension that allows merchants to export custom order data to CSV with ease.
-
-## 🚀 Features
-
-
-# ExtendedExports for Magento 2
-
 **ExtendedExports** adds a flexible and performance-friendly CSV export pipeline to Magento 2. It lets you blend core order data, selected product attributes, and values from any custom tables into a single export without touching Magento core code.
 
 ---
