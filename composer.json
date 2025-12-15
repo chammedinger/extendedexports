@@ -3,7 +3,7 @@
   "description": "Magento 2 Extended exports",
   "type": "magento2-module",
   "license": "MIT",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "autoload": {
     "psr-4": {
       "CHammedinger\\ExtendedExports\\": ""

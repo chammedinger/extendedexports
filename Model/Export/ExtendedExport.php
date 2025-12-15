@@ -120,7 +120,8 @@ class ExtendedExport
                 'Order Date',
                 'Customer Email',
                 'Total',
-                'Discount Amount',
+                'Discount Amount Total',
+                'Line Discount Amount',
                 'Discount Description',
                 'Discount Code',
                 'Charged Shipping Cost',
@@ -135,8 +136,10 @@ class ExtendedExport
                 'SKU',
                 'Price',
                 'Quantity',
-                'Row Total',
-                'VAT',
+                'Row Subtotal',
+                'Row Total (Incl. Discount)',
+                'Tax Amount Total',
+                'Line Tax Amount',
             ];
             $headers = $baseHeaders;
             // NEW: add order attribute headers first
@@ -194,18 +197,28 @@ class ExtendedExport
                     'created_at',
                     'customer_email',
                     'grand_total',
-                    'discount_amount',
+                    'order_discount_amount' => 'discount_amount',
                     'discount_description',
                     'coupon_code',
                     'shipping_amount',
                     'shipping_tax_amount',
+                    'order_tax_amount' => 'tax_amount',
                     'total_refunded',
                     'status'
                 ])
                 ->joinLeft(['a' => $a], "a.parent_id = o.entity_id AND a.address_type = 'shipping'", ['ship_to_country' => 'country_id'])
                 ->joinLeft(['p' => $conn->getTableName('sales_order_payment')], 'p.parent_id = o.entity_id', ['payment_method' => 'method'])
                 ->join(['i' => $i], 'i.order_id = o.entity_id', [
-                    'item_id','product_id','name','sku','price','qty_ordered','row_total','tax_amount'
+                    'item_id',
+                    'product_id',
+                    'name',
+                    'sku',
+                    'price',
+                    'qty_ordered',
+                    'row_subtotal' => 'row_total',
+                    'line_discount_amount' => 'discount_amount',
+                    'line_tax_amount' => 'tax_amount',
+                    'discount_tax_comp_amount' => 'discount_tax_compensation_amount'
                 ]);
 
             // NEW: add order-level attribute columns safely (only if column exists)
@@ -358,13 +371,13 @@ class ExtendedExport
 
             // stream rows
             $stmt = $conn->query($select);
-            
+
             // Get configured timezone from Magento
             $configuredTimezone = $this->scopeConfig->getValue(
                 'general/locale/timezone',
                 \Magento\Store\Model\ScopeInterface::SCOPE_STORE
             ) ?: 'UTC';
-            
+
             while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
                 // convert UTC created_at to configured store timezone
                 $dt = new \DateTime($row['created_at'], new \DateTimeZone('UTC'));
@@ -372,13 +385,25 @@ class ExtendedExport
                     ->setTimezone(new \DateTimeZone($configuredTimezone))
                     ->format('Y-m-d H:i:s');
 
+                $lineDiscountAmount = isset($row['line_discount_amount']) ? (float)$row['line_discount_amount'] : 0.0;
+                $lineRowSubtotal = isset($row['row_subtotal']) ? (float)$row['row_subtotal'] : 0.0;
+                $lineTaxAmount = isset($row['line_tax_amount']) ? (float)$row['line_tax_amount'] : 0.0;
+                $discountTaxComp = isset($row['discount_tax_comp_amount']) ? (float)$row['discount_tax_comp_amount'] : 0.0;
+                $rowTotalWithDiscount = number_format(
+                    $lineRowSubtotal - $lineDiscountAmount + $lineTaxAmount + $discountTaxComp,
+                    4,
+                    '.',
+                    ''
+                );
+
                 $csvRow = [
                     $row['increment_id'],
                     $row['store_name'],
                     $row['created_at'],
                     $row['customer_email'],
                     $row['grand_total'],
-                    $row['discount_amount'],
+                    $row['order_discount_amount'],
+                    $row['line_discount_amount'],
                     $row['discount_description'] ?? '',
                     $row['coupon_code'] ?? '',
                     $row['shipping_amount'],
@@ -393,8 +418,11 @@ class ExtendedExport
                     $row['sku'],
                     $row['price'],
                     $row['qty_ordered'],
-                    $row['row_total'],
-                    $row['tax_amount'],
+                    $row['row_subtotal'],
+                    $rowTotalWithDiscount,
+                    $row['order_tax_amount'],
+                    $row['line_tax_amount'],
+
                 ];
                 // NEW: append order attribute values
                 foreach ($orderAttributes as $attrMeta) {

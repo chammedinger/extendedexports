@@ -92,6 +92,10 @@ Both entry points call the same export service (`Model\Export\ExtendedExport`), 
 - **Dynamic Joins:** Order attributes, product attributes, and extension tables are all joined conditionally. Missing metadata logs a warning and writes empty values to keep the CSV structure stable.
 - **Configuration Parsing:** Serialized data is deserialized with Magento’s serializer first, then falls back to PHP `unserialize` with strict options. Both JSON and legacy serialized formats are supported.
 - **Column Safety:** Before selecting any column, the exporter checks `tableColumnExists`. If the column/table vanished, the CSV still renders with an empty column so downstream tools don’t break.
+- **Timezone Handling:** Order timestamps (`created_at`) are converted from UTC to the configured store timezone so exported dates match what you see in the admin.
+- **Tax Columns:** Each CSV row now includes both the order-level tax total and the per-item (line) tax amount for easier reconciliation.
+- **Discount Columns:** Similar to tax, discount amounts are exported twice—once for the full order and once for each line item—so finance teams can cross-check totals versus per-item promotions.
+- **Row Totals:** Each row carries a `Row Subtotal` (pre-discount) and a `Row Total (Incl. Discount)` so you can compare list price versus the final charged amount at a glance.
 
 ---
 
